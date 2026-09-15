@@ -29,6 +29,8 @@ for p in glob.glob(os.path.join(raw_text, "*.json")) + glob.glob(os.path.join(ra
         t["media"].append(os.path.join("raw", fn))
 
 rows = sorted(tweets.values(), key=lambda x: x["date"])
+if not rows:
+    sys.exit("no tweets found; existing outputs preserved")
 with open(os.path.join(out, "tweets.json"), "w") as f:
     json.dump(rows, f, ensure_ascii=False, indent=1)
 with open(os.path.join(out, "tweets.md"), "w") as f:

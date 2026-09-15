@@ -4,11 +4,11 @@
 # 需要: pip install gallery-dl；Chrome 里已登录 X。
 # 产出: <output_dir>/raw/       媒体文件 + 每个媒体文件的元数据 JSON
 #       <output_dir>/raw_text/  每条推文一个元数据 JSON（含纯文字推文）
-set -u
-USER="${1:?usage: $0 <username> [output_dir]}"
-OUT="${2:-$HOME/Downloads/$USER}"
+set -euo pipefail
+TARGET_USER="${1:?usage: $0 <username> [output_dir]}"
+OUT="${2:-$HOME/Downloads/$TARGET_USER}"
 BROWSER="${BROWSER:-chrome}"
-LOG="$OUT/gallery-dl.log"
+
 mkdir -p "$OUT/raw" "$OUT/raw_text"
 
 COMMON=(--cookies-from-browser "$BROWSER"
@@ -19,20 +19,30 @@ COMMON=(--cookies-from-browser "$BROWSER"
 # 所以启动后检查前 90 秒日志，发现退化就杀掉重来。
 run_with_retry() {   # $1 = pass name, rest = gallery-dl args
   local name="$1"; shift
+  local log_file="$OUT/gallery-dl-$name.log"
+  local rc
   for attempt in 1 2 3 4 5 6 7 8; do
-    : > "$LOG"
-    python3 -m gallery_dl "${COMMON[@]}" "$@" "https://x.com/$USER/timeline" >> "$LOG" 2>&1 &
+    : > "$log_file"
+    python3 -m gallery_dl "${COMMON[@]}" "$@" "https://x.com/$TARGET_USER/timeline" >> "$log_file" 2>&1 &
     local pid=$!
     for _ in $(seq 1 90); do
       sleep 1
-      if grep -qE "malformed|guest token|AuthRequired" "$LOG"; then
+      if grep -qE "malformed|guest token|AuthRequired" "$log_file"; then
         echo "[$name] attempt $attempt: cookie read failed, retrying"
-        kill $pid 2>/dev/null; wait $pid 2>/dev/null; sleep 5; continue 2
+        kill "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+        sleep 5; continue 2
       fi
-      grep -qE "client transaction keys|/raw" "$LOG" && break
+      if ! kill -0 "$pid" 2>/dev/null; then break; fi
     done
-    echo "[$name] attempt $attempt: authenticated (pid $pid), running..."
-    wait $pid; echo "[$name] finished, exit=$?"; return 0
+    if wait "$pid"; then
+      echo "[$name] finished, exit=0"
+      return 0
+    else
+      rc=$?
+      echo "[$name] failed, exit=$rc; see $log_file" >&2
+      return "$rc"
+    fi
   done
   echo "[$name] gave up after 8 attempts"; return 1
 }
@@ -46,6 +56,6 @@ run_with_retry media --write-metadata -o videos=true \
 run_with_retry text --no-download \
   -P metadata -O event=post -O directory=. -O filename="{date:%Y%m%d}_{tweet_id}.json" \
   -D "$OUT/raw_text"
-find "$OUT/raw_text" -type f ! -name '*.json' -delete   # 清掉 --no-download 留下的空占位文件
+# 保留未知文件；merge.py 只读取 JSON，无需清理用户目录。
 
 python3 "$(dirname "$0")/merge.py" "$OUT"
