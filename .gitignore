@@ -1,0 +1,8 @@
+# 推文归档数据不入库（第三方内容，且体积大）
+archive/
+*.log
+raw/
+raw_text/
+tweets.json
+tweets.md
+__pycache__/
